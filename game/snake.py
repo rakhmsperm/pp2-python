@@ -1,99 +1,150 @@
-import pygame
+import json
+import os
 import random
 import sys
+from datetime import datetime
 
-
+import pygame
 
 pygame.init()
 
-
-
-WIDTH = 600
-HEIGHT = 400
-
-
+WIDTH, HEIGHT = 600, 400
 CELL_SIZE = 20
-
+LEADERBOARD_FILE = "leaderboard.json"
+MAX_LEADERBOARD_ITEMS = 5
 
 BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
 GREEN = (0, 200, 0)
 DARK_GREEN = (0, 120, 0)
 RED = (220, 0, 0)
-WHITE = (255, 255, 255)
 GRAY = (80, 80, 80)
-
-
+ORANGE = (230, 130, 0)
+BLUE = (70, 130, 220)
 
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Змейка на Python")
-
-
-
+pygame.display.set_caption("Snake with Leaderboard and Obstacles")
 clock = pygame.time.Clock()
+font = pygame.font.SysFont("Arial", 24)
+small_font = pygame.font.SysFont("Arial", 18)
 
 
-
-font = pygame.font.SysFont("Arial", 28)
-
-
-def draw_text(text, color, x, y):
-    """
-    Рисует текст на экране.
-    """
-    image = font.render(text, True, color)
+def draw_text(text, color, x, y, small=False):
+    selected_font = small_font if small else font
+    image = selected_font.render(text, True, color)
     screen.blit(image, (x, y))
 
 
-def random_food_position():
-    """
-    Возвращает случайную позицию еды.
-    Позиция всегда кратна CELL_SIZE, чтобы еда была ровно в клетке.
-    """
+def load_leaderboard():
+    if not os.path.exists(LEADERBOARD_FILE):
+        return []
+
+    try:
+        with open(LEADERBOARD_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+            if isinstance(data, list):
+                return data
+    except (json.JSONDecodeError, OSError):
+        pass
+
+    return []
+
+
+def save_leaderboard(leaderboard):
+    with open(LEADERBOARD_FILE, "w", encoding="utf-8") as file:
+        json.dump(leaderboard, file, indent=4, ensure_ascii=False)
+
+
+def add_score_to_leaderboard(score):
+    leaderboard = load_leaderboard()
+    leaderboard.append({
+        "score": score,
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
+    leaderboard.sort(key=lambda item: item["score"], reverse=True)
+    leaderboard = leaderboard[:MAX_LEADERBOARD_ITEMS]
+    save_leaderboard(leaderboard)
+    return leaderboard
+
+
+def random_cell():
     x = random.randrange(0, WIDTH, CELL_SIZE)
     y = random.randrange(0, HEIGHT, CELL_SIZE)
     return [x, y]
 
 
-def draw_snake(snake):
-    """
-    Рисует змейку.
-    snake — это список клеток.
-    Каждая клетка выглядит как [x, y].
-    """
-    for index, segment in enumerate(snake):
-        color = GREEN if index == 0 else DARK_GREEN
-        pygame.draw.rect(
-            screen,
-            color,
-            pygame.Rect(segment[0], segment[1], CELL_SIZE, CELL_SIZE)
-        )
+def random_free_cell(blocked_cells):
+    while True:
+        position = random_cell()
+        if position not in blocked_cells:
+            return position
 
 
-def draw_food(food):
-    """
-    Рисует еду.
-    """
+def create_obstacles(snake, amount=8):
+    obstacles = []
+    blocked_cells = snake.copy()
+
+    for _ in range(amount):
+        obstacle = random_free_cell(blocked_cells)
+        obstacles.append(obstacle)
+        blocked_cells.append(obstacle)
+
+    return obstacles
+
+
+def draw_rect_cell(position, color):
     pygame.draw.rect(
         screen,
-        RED,
-        pygame.Rect(food[0], food[1], CELL_SIZE, CELL_SIZE)
+        color,
+        pygame.Rect(position[0], position[1], CELL_SIZE, CELL_SIZE)
     )
 
 
+def draw_snake(snake):
+    for index, segment in enumerate(snake):
+        draw_rect_cell(segment, GREEN if index == 0 else DARK_GREEN)
+
+
+def draw_obstacles(obstacles):
+    for obstacle in obstacles:
+        draw_rect_cell(obstacle, GRAY)
+
+
+def draw_leaderboard(x=410, y=35):
+    leaderboard = load_leaderboard()
+    draw_text("Leaderboard", BLUE, x, y, small=True)
+
+    if not leaderboard:
+        draw_text("No records yet", WHITE, x, y + 25, small=True)
+        return
+
+    for index, item in enumerate(leaderboard, start=1):
+        text = f"{index}. {item['score']} pts"
+        draw_text(text, WHITE, x, y + 20 + index * 22, small=True)
+
+
 def game_over_screen(score):
-    """
-    Экран после проигрыша.
-    """
-    screen.fill(BLACK)
-
-    draw_text("Игра окончена!", WHITE, WIDTH // 2 - 110, HEIGHT // 2 - 70)
-    draw_text(f"Счет: {score}", WHITE, WIDTH // 2 - 50, HEIGHT // 2 - 30)
-    draw_text("R - начать заново", WHITE, WIDTH // 2 - 120, HEIGHT // 2 + 20)
-    draw_text("Q - выйти", WHITE, WIDTH // 2 - 70, HEIGHT // 2 + 60)
-
-    pygame.display.update()
+    leaderboard = add_score_to_leaderboard(score)
 
     while True:
+        screen.fill(BLACK)
+        draw_text("Game Over!", WHITE, WIDTH // 2 - 70, 60)
+        draw_text(f"Your score: {score}", WHITE, WIDTH // 2 - 80, 100)
+        draw_text("Top scores:", BLUE, WIDTH // 2 - 65, 145)
+
+        for index, item in enumerate(leaderboard, start=1):
+            draw_text(
+                f"{index}. {item['score']} pts | {item['date']}",
+                WHITE,
+                WIDTH // 2 - 150,
+                150 + index * 28,
+                small=True
+            )
+
+        draw_text("R - restart", WHITE, WIDTH // 2 - 70, 320)
+        draw_text("Q - quit", WHITE, WIDTH // 2 - 55, 350)
+        pygame.display.update()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -108,39 +159,21 @@ def game_over_screen(score):
 
 
 def main():
-    """
-    Главная функция игры.
-    Здесь происходит основной игровой цикл.
-    """
-
-    # Начальная позиция змейки
-    snake = [
-        [100, 100],
-        [80, 100],
-        [60, 100]
-    ]
-
-    # Начальное направление движения
+    snake = [[100, 100], [80, 100], [60, 100]]
     direction = "RIGHT"
     next_direction = direction
-
-    # Позиция еды
-    food = random_food_position()
-
-    
     score = 0
-
-    
     speed = 10
 
+    obstacles = create_obstacles(snake, amount=8)
+    food = random_free_cell(snake + obstacles)
+
     while True:
-        
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 sys.exit()
 
-            
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_UP and direction != "DOWN":
                     next_direction = "UP"
@@ -153,11 +186,7 @@ def main():
 
         direction = next_direction
 
-
-        head_x = snake[0][0]
-        head_y = snake[0][1]
-
-        
+        head_x, head_y = snake[0]
         if direction == "UP":
             head_y -= CELL_SIZE
         elif direction == "DOWN":
@@ -169,48 +198,36 @@ def main():
 
         new_head = [head_x, head_y]
 
-        
-        if (
-            head_x < 0 or
-            head_x >= WIDTH or
-            head_y < 0 or
-            head_y >= HEIGHT
-        ):
+        hit_wall = head_x < 0 or head_x >= WIDTH or head_y < 0 or head_y >= HEIGHT
+        hit_self = new_head in snake
+        hit_obstacle = new_head in obstacles
+
+        if hit_wall or hit_self or hit_obstacle:
             game_over_screen(score)
 
-        
-        if new_head in snake:
-            game_over_screen(score)
-
-        
         snake.insert(0, new_head)
 
-        
         if new_head == food:
             score += 1
-            food = random_food_position()
+            food = random_free_cell(snake + obstacles)
 
-            
             if score % 5 == 0:
                 speed += 1
+                obstacles.append(random_free_cell(snake + obstacles + [food]))
         else:
-            
             snake.pop()
 
-        
         screen.fill(BLACK)
-
-        draw_food(food)
+        draw_rect_cell(food, RED)
+        draw_obstacles(obstacles)
         draw_snake(snake)
+        draw_text(f"Score: {score}", WHITE, 10, 10)
+        draw_text(f"Obstacles: {len(obstacles)}", ORANGE, 10, 35, small=True)
+        draw_leaderboard()
 
-        draw_text(f"Счет: {score}", WHITE, 10, 10)
-
-        
         pygame.display.update()
-
-        
         clock.tick(speed)
 
 
-
-main()
+if __name__ == "__main__":
+    main()
